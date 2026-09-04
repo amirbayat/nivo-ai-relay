@@ -4,6 +4,9 @@ import httpProxy from 'http-proxy';
 const PORT = process.env.PORT || 3000;
 const TARGET_BASE_URL = process.env.TARGET_BASE_URL || 'https://openrouter.ai';
 const SHARED_SECRET = process.env.RELAY_SHARED_SECRET;
+// دیباگ موقت: هدرهای هر درخواست را چاپ می‌کند (Authorization/secret را کامل نشان نمی‌دهد)
+// تا بشود دید واقعاً چه HTTP-Referer/X-Title‌ای از بک‌اند ایران به اینجا می‌رسد.
+const LOG_HEADERS = process.env.LOG_HEADERS === 'true';
 
 if (!SHARED_SECRET) {
   console.error('RELAY_SHARED_SECRET env var is required — refusing to start as an open relay.');
@@ -33,6 +36,19 @@ function isAuthorized(req) {
   return req.headers['x-relay-secret'] === SHARED_SECRET;
 }
 
+function redact(value) {
+  if (!value) return value;
+  return value.length > 12 ? `${value.slice(0, 8)}...(${value.length} chars)` : '***';
+}
+
+function logHeaders(req) {
+  if (!LOG_HEADERS) return;
+  const safe = { ...req.headers };
+  if (safe.authorization) safe.authorization = redact(safe.authorization);
+  if (safe['x-relay-secret']) safe['x-relay-secret'] = redact(safe['x-relay-secret']);
+  console.log(`relay: ${req.method} ${req.url} headers=`, safe);
+}
+
 const server = http.createServer((req, res) => {
   if (req.url === '/healthz') {
     res.writeHead(200, { 'content-type': 'text/plain' });
@@ -46,6 +62,7 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  logHeaders(req);
   proxy.web(req, res);
 });
 
