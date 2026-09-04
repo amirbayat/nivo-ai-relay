@@ -1,0 +1,13 @@
+{
+  "name": "openrouter-relay",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Reverse-proxy relay: sits on a non-Iran server, forwards requests to OpenRouter under its own domain/IP.",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "http-proxy": "^1.18.1"
+  }
+}
