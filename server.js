@@ -1,5 +1,6 @@
 import http from 'node:http';
 import httpProxy from 'http-proxy';
+import { PassThrough } from 'node:stream';
 
 const PORT = process.env.PORT || 3000;
 const TARGET_BASE_URL = process.env.TARGET_BASE_URL || 'https://openrouter.ai';
@@ -7,6 +8,10 @@ const SHARED_SECRET = process.env.RELAY_SHARED_SECRET;
 // دیباگ موقت: هدرهای هر درخواست را چاپ می‌کند (Authorization/secret را کامل نشان نمی‌دهد)
 // تا بشود دید واقعاً چه HTTP-Referer/X-Title‌ای از بک‌اند ایران به اینجا می‌رسد.
 const LOG_HEADERS = process.env.LOG_HEADERS === 'true';
+// دیباگ موقت: بدنه‌ی هر درخواست (مدل + پرامپت/messages) را چاپ می‌کند، برای تشخیص اینکه
+// درخواست واقعاً تا اینجا (سرور خارج از ایران) رسیده یا نه و دقیقاً چه چیزی فرستاده شده.
+const LOG_PROMPTS = process.env.LOG_PROMPTS !== 'false';
+const LOG_PROMPT_MAX_CHARS = 4000;
 
 if (!SHARED_SECRET) {
   console.error('RELAY_SHARED_SECRET env var is required — refusing to start as an open relay.');
@@ -49,7 +54,39 @@ function logHeaders(req) {
   console.log(`relay: ${req.method} ${req.url} headers=`, safe);
 }
 
-const server = http.createServer((req, res) => {
+function readBody(req) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    req.on('data', (chunk) => chunks.push(chunk));
+    req.on('end', () => resolve(Buffer.concat(chunks)));
+    req.on('error', reject);
+  });
+}
+
+function truncate(text) {
+  return text.length > LOG_PROMPT_MAX_CHARS
+    ? `${text.slice(0, LOG_PROMPT_MAX_CHARS)}...(${text.length} chars total)`
+    : text;
+}
+
+function logPrompt(req, bodyBuffer) {
+  if (!LOG_PROMPTS || bodyBuffer.length === 0) return;
+  let body;
+  try {
+    body = JSON.parse(bodyBuffer.toString('utf8'));
+  } catch {
+    console.log(`relay: ${req.method} ${req.url} body=<non-JSON, ${bodyBuffer.length} bytes>`);
+    return;
+  }
+  const { model, messages, prompt } = body;
+  console.log(
+    `relay: ${req.method} ${req.url} model=${model ?? '?'} prompt=${truncate(
+      JSON.stringify(messages ?? prompt ?? body),
+    )}`,
+  );
+}
+
+const server = http.createServer(async (req, res) => {
   if (req.url === '/healthz') {
     res.writeHead(200, { 'content-type': 'text/plain' });
     res.end('ok');
@@ -63,7 +100,24 @@ const server = http.createServer((req, res) => {
   }
 
   logHeaders(req);
-  proxy.web(req, res);
+
+  // بدنه را کامل می‌خوانیم تا هم بشود پرامپت را لاگ کرد هم بدون تغییر به OpenRouter پاس داد
+  // (http-proxy وقتی گزینه‌ی buffer داده شود، به‌جای خودِ req از این استریم می‌خواند).
+  let bodyBuffer;
+  try {
+    bodyBuffer = await readBody(req);
+  } catch (err) {
+    console.error('relay: failed to read request body:', err.message);
+    res.writeHead(400, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ error: 'bad_request' }));
+    return;
+  }
+
+  logPrompt(req, bodyBuffer);
+
+  const buffer = new PassThrough();
+  buffer.end(bodyBuffer);
+  proxy.web(req, res, { buffer });
 });
 
 // Not used by OpenRouter's current REST/SSE endpoints, but kept so a future

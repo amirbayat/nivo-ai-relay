@@ -6,6 +6,8 @@ services:
       - PORT=3000
       - TARGET_BASE_URL=https://openrouter.ai
       - RELAY_SHARED_SECRET=${RELAY_SHARED_SECRET}
+      - LOG_HEADERS=${LOG_HEADERS:-false}
+      - LOG_PROMPTS=${LOG_PROMPTS:-true}
     expose:
       - '3000'
 
