@@ -9,8 +9,8 @@
 
 ## دیپلوی روی سرور هلند
 
-1. یک دامنه/ساب‌دامنه بسازید (مثلاً `relay.yourdomain.com`) و رکورد A آن را به IP سرور بزنید.
-2. `Caddyfile` را ویرایش کنید و `relay.yourdomain.com` را با دامنه‌ی واقعی‌تان جایگزین کنید.
+1. یک دامنه/ساب‌دامنه بسازید (مثلاً `relay.nivoai.site`) و رکورد A آن را به IP سرور بزنید.
+2. `Caddyfile` را ویرایش کنید و `relay.nivoai.site` را با دامنه‌ی واقعی‌تان جایگزین کنید.
 3. یک secret تصادفی طولانی بسازید:
    ```bash
    openssl rand -hex 32
@@ -25,8 +25,8 @@
    Caddy خودکار گواهی TLS (Let's Encrypt) برای دامنه می‌گیرد — فقط پورت‌های ۸۰/۴۴۳ باید باز باشند.
 5. تست:
    ```bash
-   curl https://relay.yourdomain.com/healthz          # -> ok
-   curl -H "X-Relay-Secret: <secret>" https://relay.yourdomain.com/api/v1/models
+   curl https://relay.nivoai.site/healthz          # -> ok
+   curl -H "X-Relay-Secret: <secret>" https://relay.nivoai.site/api/v1/models
    ```
 
 ## وصل‌کردن به nivo-ai-backend
@@ -34,7 +34,7 @@
 در env بک‌اند اصلی (پروداکشن، اپ Darkube):
 
 ```
-OPENROUTER_BASE_URL=https://relay.yourdomain.com/api/v1
+OPENROUTER_BASE_URL=https://relay.nivoai.site/api/v1
 OPENROUTER_RELAY_SECRET=<همان secret بالا>
 ```
 
