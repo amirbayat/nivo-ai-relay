@@ -132,4 +132,9 @@ server.on('upgrade', (req, socket, head) => {
 
 server.listen(PORT, () => {
   console.log(`openrouter-relay listening on :${PORT} -> ${TARGET_BASE_URL}`);
+  console.log(
+    `relay: config LOG_HEADERS=${LOG_HEADERS} (raw=${JSON.stringify(
+      process.env.LOG_HEADERS,
+    )}) LOG_PROMPTS=${LOG_PROMPTS} (raw=${JSON.stringify(process.env.LOG_PROMPTS)})`,
+  );
 });
