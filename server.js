@@ -25,8 +25,23 @@ const proxy = httpProxy.createProxyServer({
 });
 
 // Strip the auth header before it ever reaches OpenRouter — it's ours, not theirs.
+// Also strip everything Traefik added in front of us that would reveal the
+// original (Iran-based) client IP to the upstream — the whole point of this
+// relay is that the upstream should only ever see this box's own IP.
+const HOP_HEADERS_TO_STRIP = [
+  'x-relay-secret',
+  'x-forwarded-for',
+  'x-real-ip',
+  'x-forwarded-host',
+  'x-forwarded-proto',
+  'x-forwarded-port',
+  'x-forwarded-server',
+];
+
 proxy.on('proxyReq', (proxyReq) => {
-  proxyReq.removeHeader('x-relay-secret');
+  for (const header of HOP_HEADERS_TO_STRIP) {
+    proxyReq.removeHeader(header);
+  }
 });
 
 proxy.on('error', (err, _req, res) => {
