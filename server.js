@@ -3,7 +3,7 @@ import httpProxy from 'http-proxy';
 import { PassThrough } from 'node:stream';
 
 const PORT = process.env.PORT || 3000;
-const TARGET_BASE_URL = process.env.TARGET_BASE_URL || 'https://openrouter.ai';
+const DEFAULT_TARGET_BASE_URL = process.env.TARGET_BASE_URL || 'https://openrouter.ai';
 const SHARED_SECRET = process.env.RELAY_SHARED_SECRET;
 // دیباگ موقت: هدرهای هر درخواست را چاپ می‌کند (Authorization/secret را کامل نشان نمی‌دهد)
 // تا بشود دید واقعاً چه HTTP-Referer/X-Title‌ای از بک‌اند ایران به اینجا می‌رسد.
@@ -18,8 +18,32 @@ if (!SHARED_SECRET) {
   process.exit(1);
 }
 
+// این ریله دیگر فقط برای OpenRouter نیست — یک reverse-proxy چندمقصده شده: با یک prefix روی
+// مسیر، درخواست به هر upstream خارج از ایران که بک‌اند نیوو لازم دارد فوروارد می‌شود (اضافه‌شده
+// برای فیچر «ویرایش ویدیو» — docs/PRD-video-edit-omni-kie.md §۳ — که به دو upstream جدای
+// Kie.ai نیاز دارد: خودِ API و دامنه‌ی جدای آپلود فایل). بدون prefix (رفتار قبلی، دست‌نخورده)
+// یعنی OpenRouter — پس تنظیمات پروداکشن فعلی نیازی به تغییر ندارند. اضافه‌کردن provider بعدی
+// یعنی فقط یک ردیف جدید اینجا + یکی‌دو env var — بدون دیپلوی relay/دامنه‌ی جدا، بدون تغییر Caddyfile
+// (هنوز فقط یک host روی این پورت پروکسی می‌شود).
+const ROUTES = [
+  // طولانی‌ترین prefix اول — وگرنه '/kie-upload/...' اشتباهی با prefix کوتاه‌تر '/kie' مچ می‌شود
+  { prefix: '/kie-upload', target: process.env.KIE_UPLOAD_TARGET_BASE_URL },
+  { prefix: '/kie', target: process.env.KIE_TARGET_BASE_URL },
+].filter((route) => route.target);
+
+// مسیر واقعی درخواست را به upstream/مسیر-باقی‌مانده‌ی درست ترجمه می‌کند — مثلاً با
+// KIE_TARGET_BASE_URL=https://api.kie.ai، درخواست به /kie/api/v1/jobs/createTask باید
+// /api/v1/jobs/createTask را به api.kie.ai بزند، نه /kie/api/v1/jobs/createTask را
+function resolveTarget(url) {
+  for (const route of ROUTES) {
+    if (url === route.prefix || url.startsWith(`${route.prefix}/`)) {
+      return { target: route.target, forwardedPath: url.slice(route.prefix.length) || '/' };
+    }
+  }
+  return { target: DEFAULT_TARGET_BASE_URL, forwardedPath: url };
+}
+
 const proxy = httpProxy.createProxyServer({
-  target: TARGET_BASE_URL,
   changeOrigin: true,
   secure: true,
 });
@@ -130,9 +154,12 @@ const server = http.createServer(async (req, res) => {
 
   logPrompt(req, bodyBuffer);
 
+  const { target, forwardedPath } = resolveTarget(req.url);
+  req.url = forwardedPath; // http-proxy فقط req.url رو به انتهای target اضافه می‌کند
+
   const buffer = new PassThrough();
   buffer.end(bodyBuffer);
-  proxy.web(req, res, { buffer });
+  proxy.web(req, res, { target, buffer });
 });
 
 // Not used by OpenRouter's current REST/SSE endpoints, but kept so a future
@@ -142,11 +169,16 @@ server.on('upgrade', (req, socket, head) => {
     socket.destroy();
     return;
   }
-  proxy.ws(req, socket, head);
+  const { target, forwardedPath } = resolveTarget(req.url);
+  req.url = forwardedPath;
+  proxy.ws(req, socket, head, { target });
 });
 
 server.listen(PORT, () => {
-  console.log(`openrouter-relay listening on :${PORT} -> ${TARGET_BASE_URL}`);
+  console.log(`openrouter-relay listening on :${PORT} -> default=${DEFAULT_TARGET_BASE_URL}`);
+  for (const route of ROUTES) {
+    console.log(`relay: route ${route.prefix}/* -> ${route.target}`);
+  }
   console.log(
     `relay: config LOG_HEADERS=${LOG_HEADERS} (raw=${JSON.stringify(
       process.env.LOG_HEADERS,
