@@ -29,6 +29,9 @@ const ROUTES = [
   // طولانی‌ترین prefix اول — وگرنه '/kie-upload/...' اشتباهی با prefix کوتاه‌تر '/kie' مچ می‌شود
   { prefix: '/kie-upload', target: process.env.KIE_UPLOAD_TARGET_BASE_URL },
   { prefix: '/kie', target: process.env.KIE_TARGET_BASE_URL },
+  // docs/PRD-telegram-bot-channel.md — ایران تلگرام را فیلتر می‌کند؛ فراخوانی خروجی بک‌اند به
+  // api.telegram.org (ارسال پاسخ/دانلود فایل) باید از همین relay رد شود، دقیقاً مثل OpenRouter/Kie
+  { prefix: '/telegram', target: process.env.TELEGRAM_TARGET_BASE_URL },
 ].filter((route) => route.target);
 
 // مسیر واقعی درخواست را به upstream/مسیر-باقی‌مانده‌ی درست ترجمه می‌کند — مثلاً با

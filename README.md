@@ -73,3 +73,25 @@ OpenRouter از قبل با prefix خالی (پیش‌فرض) استفاده م�
 
 بدون ست‌کردن این دو env var روی این سرور، مسیرهای `/kie`/`/kie-upload` اصلاً وجود ندارند و
 رفتار فعلی OpenRouter کاملاً دست‌نخورده می‌ماند — این یک تغییر additive است، نه یک migration.
+
+## بات تلگرام — همین الگو، بدون relay/دامنه‌ی جدا
+
+ایران تلگرام را فیلتر می‌کند، پس فراخوانی خروجی بک‌اند به `api.telegram.org` (ارسال پیام/دانلود
+فایل، نه خودِ وبهوک ورودی که مشکلی ندارد) باید از این relay رد شود:
+
+روی سرور relay:
+```
+TELEGRAM_TARGET_BASE_URL=https://api.telegram.org
+```
+
+روی env بک‌اند اصلی:
+```
+TELEGRAM_API_BASE_URL=https://relay.nivoai.site/telegram
+TELEGRAM_RELAY_SECRET=<همان RELAY_SHARED_SECRET>
+```
+
+درخواست به `{TELEGRAM_API_BASE_URL}/bot<TOKEN>/sendMessage` روی relay به
+`/telegram/bot<TOKEN>/sendMessage` می‌رسد، prefix `/telegram` کنار گذاشته می‌شود، و مسیر
+باقی‌مانده (`/bot<TOKEN>/sendMessage`) به `TELEGRAM_TARGET_BASE_URL` زده می‌شود — همان مکانیزم
+Kie.ai بالا. بدون ست‌کردن `TELEGRAM_TARGET_BASE_URL` روی این سرور، مسیر `/telegram` اصلاً وجود
+ندارد و بقیه‌ی relay دست‌نخورده می‌ماند.
