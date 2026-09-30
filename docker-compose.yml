@@ -8,6 +8,14 @@ services:
       - RELAY_SHARED_SECRET=${RELAY_SHARED_SECRET}
       - LOG_HEADERS=${LOG_HEADERS:-false}
       - LOG_PROMPTS=${LOG_PROMPTS:-true}
+      # اختیاری — چندمقصدی (docs/PRD-video-edit-omni-kie.md §۳،
+      # docs/PRD-telegram-bot-channel.md). قبلاً اینجا لیست نبودند، پس با اینکه در .env ست
+      # می‌شدند، هرگز به کانتینر نمی‌رسیدند (docker compose فقط متغیرهای همین لیست را از .env
+      # میزبان به process.env کانتینر تزریق می‌کند) — route های /kie و /telegram در نتیجه در
+      # server.js همیشه فیلتر می‌شدند (route.target === undefined)، حتی وقتی .env درست بود.
+      - KIE_TARGET_BASE_URL=${KIE_TARGET_BASE_URL:-}
+      - KIE_UPLOAD_TARGET_BASE_URL=${KIE_UPLOAD_TARGET_BASE_URL:-}
+      - TELEGRAM_TARGET_BASE_URL=${TELEGRAM_TARGET_BASE_URL:-}
     expose:
       - '3000'
 

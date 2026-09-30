@@ -71,12 +71,21 @@ proxy.on('proxyReq', (proxyReq) => {
   }
 });
 
-proxy.on('error', (err, _req, res) => {
-  console.error('relay: upstream error:', err.message);
+proxy.on('error', (err, req, res) => {
+  console.error(`relay: upstream error for ${redactUrl(req._relayOriginalUrl ?? req.url)}:`, err.message);
   if (res.writeHead && !res.headersSent) {
     res.writeHead(502, { 'content-type': 'application/json' });
   }
   res.end(JSON.stringify({ error: 'bad_gateway' }));
+});
+
+// این لاگ همون چیزی است که قبلاً فقط با curl دستی می‌شد فهمید: این درخواست واقعاً کدوم
+// route را گرفته (مثلاً /telegram) و از upstream چه status codeای برگشته — بدون این، تنها
+// راه فهمیدن «آیا این پراسس کد جدید را دارد یا افتاده روی fallback پیش‌فرض» یک curl دستی بود.
+proxy.on('proxyRes', (proxyRes, req) => {
+  console.log(
+    `relay: <- ${proxyRes.statusCode} ${req.method} ${redactUrl(req._relayOriginalUrl ?? req.url)} -> ${req._relayTarget ?? '?'}`,
+  );
 });
 
 function isAuthorized(req) {
@@ -88,12 +97,19 @@ function redact(value) {
   return value.length > 12 ? `${value.slice(0, 8)}...(${value.length} chars)` : '***';
 }
 
+// مسیر تلگرام (/telegram/bot<TOKEN>/...) خودِ توکن بات را توی URL دارد — قبل از این تابع
+// همه‌ی لاگ‌های زیر (headers/prompt/routing/response) این توکن را عیناً چاپ می‌کردند.
+// همون الگوی redact بالا را برای URL هم اعمال می‌کنیم.
+function redactUrl(url) {
+  return url.replace(/\/bot\d+:[^/]+/, '/bot***');
+}
+
 function logHeaders(req) {
   if (!LOG_HEADERS) return;
   const safe = { ...req.headers };
   if (safe.authorization) safe.authorization = redact(safe.authorization);
   if (safe['x-relay-secret']) safe['x-relay-secret'] = redact(safe['x-relay-secret']);
-  console.log(`relay: ${req.method} ${req.url} headers=`, safe);
+  console.log(`relay: ${req.method} ${redactUrl(req.url)} headers=`, safe);
 }
 
 function readBody(req) {
@@ -122,7 +138,7 @@ function logPrompt(req, bodyBuffer) {
   }
   const { model, messages, prompt } = body;
   console.log(
-    `relay: ${req.method} ${req.url} model=${model ?? '?'} prompt=${truncate(
+    `relay: ${req.method} ${redactUrl(req.url)} model=${model ?? '?'} prompt=${truncate(
       JSON.stringify(messages ?? prompt ?? body),
     )}`,
   );
@@ -157,8 +173,13 @@ const server = http.createServer(async (req, res) => {
 
   logPrompt(req, bodyBuffer);
 
+  const originalUrl = req.url;
   const { target, forwardedPath } = resolveTarget(req.url);
+  console.log(`relay: -> ${target}${redactUrl(forwardedPath)}`);
   req.url = forwardedPath; // http-proxy فقط req.url رو به انتهای target اضافه می‌کند
+  // برای proxyRes/error هندلرهای بالا نگه می‌داریم — آن‌ها req.url رو بعد از rewrite می‌بینند
+  req._relayOriginalUrl = originalUrl;
+  req._relayTarget = target;
 
   const buffer = new PassThrough();
   buffer.end(bodyBuffer);
