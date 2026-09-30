@@ -16,6 +16,9 @@ services:
       - KIE_TARGET_BASE_URL=${KIE_TARGET_BASE_URL:-}
       - KIE_UPLOAD_TARGET_BASE_URL=${KIE_UPLOAD_TARGET_BASE_URL:-}
       - TELEGRAM_TARGET_BASE_URL=${TELEGRAM_TARGET_BASE_URL:-}
+      # inbound — وبهوک تلگرام (تلگرام -> این relay -> بک‌اند ایران)، چون طبق تجربه‌ی واقعی
+      # پروداکشن اتصال مستقیم تلگرام به سرور ایران هم فیلتر می‌شود
+      - TELEGRAM_WEBHOOK_TARGET_URL=${TELEGRAM_WEBHOOK_TARGET_URL:-}
     expose:
       - '3000'
 

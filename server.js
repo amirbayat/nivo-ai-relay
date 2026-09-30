@@ -18,6 +18,21 @@ if (!SHARED_SECRET) {
   process.exit(1);
 }
 
+// مسیر ثابتی که خودِ تلگرام (نه بک‌اند ما) با POST صدا می‌زند — برخلاف مسیرهای بالا که
+// outbound (بک‌اند ایران -> این relay -> تلگرام) هستند، این یکی inbound است (تلگرام -> این
+// relay -> بک‌اند ایران). طبق تجربه‌ی واقعی پروداکشن، وبهوک مستقیم به سرور ایران هم فیلتر
+// می‌شود (نه فقط outbound)، پس این relay هم باید طرف دریافت وبهوک را پوشش بدهد.
+// چون درخواست از خودِ تلگرام می‌آید، هدر X-Relay-Secret را نمی‌فرستد — این مسیر از چک
+// isAuthorized معاف است؛ امنیت با secret_token تلگرام تأمین می‌شود که خودِ بک‌اند
+// (telegram.controller.ts) از قبل چک می‌کند، پس این relay فقط بی‌طرف فوروارد می‌کند.
+const TELEGRAM_WEBHOOK_PATH = '/telegram-webhook';
+const TELEGRAM_WEBHOOK_TARGET_URL = process.env.TELEGRAM_WEBHOOK_TARGET_URL || '';
+let telegramWebhookTarget = null;
+if (TELEGRAM_WEBHOOK_TARGET_URL) {
+  const parsed = new URL(TELEGRAM_WEBHOOK_TARGET_URL);
+  telegramWebhookTarget = { origin: parsed.origin, path: parsed.pathname + parsed.search };
+}
+
 // این ریله دیگر فقط برای OpenRouter نیست — یک reverse-proxy چندمقصده شده: با یک prefix روی
 // مسیر، درخواست به هر upstream خارج از ایران که بک‌اند نیوو لازم دارد فوروارد می‌شود (اضافه‌شده
 // برای فیچر «ویرایش ویدیو» — docs/PRD-video-edit-omni-kie.md §۳ — که به دو upstream جدای
@@ -151,6 +166,38 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (req.method === 'POST' && req.url === TELEGRAM_WEBHOOK_PATH) {
+    if (!telegramWebhookTarget) {
+      res.writeHead(404, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ error: 'telegram_webhook_not_configured' }));
+      return;
+    }
+
+    logHeaders(req);
+
+    let bodyBuffer;
+    try {
+      bodyBuffer = await readBody(req);
+    } catch (err) {
+      console.error('relay: failed to read telegram webhook body:', err.message);
+      res.writeHead(400, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ error: 'bad_request' }));
+      return;
+    }
+
+    logPrompt(req, bodyBuffer);
+
+    console.log(`relay: telegram webhook -> ${telegramWebhookTarget.origin}${telegramWebhookTarget.path}`);
+    req._relayOriginalUrl = req.url;
+    req._relayTarget = telegramWebhookTarget.origin;
+    req.url = telegramWebhookTarget.path;
+
+    const webhookBuffer = new PassThrough();
+    webhookBuffer.end(bodyBuffer);
+    proxy.web(req, res, { target: telegramWebhookTarget.origin, buffer: webhookBuffer });
+    return;
+  }
+
   if (!isAuthorized(req)) {
     res.writeHead(403, { 'content-type': 'application/json' });
     res.end(JSON.stringify({ error: 'forbidden' }));
@@ -202,6 +249,11 @@ server.listen(PORT, () => {
   console.log(`openrouter-relay listening on :${PORT} -> default=${DEFAULT_TARGET_BASE_URL}`);
   for (const route of ROUTES) {
     console.log(`relay: route ${route.prefix}/* -> ${route.target}`);
+  }
+  if (telegramWebhookTarget) {
+    console.log(
+      `relay: route POST ${TELEGRAM_WEBHOOK_PATH} -> ${telegramWebhookTarget.origin}${telegramWebhookTarget.path} (inbound, no X-Relay-Secret required)`,
+    );
   }
   console.log(
     `relay: config LOG_HEADERS=${LOG_HEADERS} (raw=${JSON.stringify(

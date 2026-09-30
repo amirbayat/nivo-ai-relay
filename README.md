@@ -76,8 +76,12 @@ OpenRouter از قبل با prefix خالی (پیش‌فرض) استفاده م�
 
 ## بات تلگرام — همین الگو، بدون relay/دامنه‌ی جدا
 
-ایران تلگرام را فیلتر می‌کند، پس فراخوانی خروجی بک‌اند به `api.telegram.org` (ارسال پیام/دانلود
-فایل، نه خودِ وبهوک ورودی که مشکلی ندارد) باید از این relay رد شود:
+ایران تلگرام را فیلتر می‌کند. برخلاف فرضِ اولیه‌ی این پروژه («وبهوک ورودی چون از بیرون ایران
+شروع می‌شود مشکلی ندارد» — نگاه کنید `docs/PRD-telegram-bot-channel.md` §کشف ۱۴۰۵/۰۷/۰۹)، تست
+واقعی بعدی نشان داد اتصال inbound تلگرام به سرور ایران هم فیلتر/مسدود می‌شود، نه فقط outbound
+بک‌اند به تلگرام. پس **هر دو جهت** ارتباط با تلگرام باید از این relay رد شوند.
+
+### جهت خروجی (بک‌اند ایران -> تلگرام): ارسال پیام/دانلود فایل
 
 روی سرور relay:
 ```
@@ -95,3 +99,26 @@ TELEGRAM_RELAY_SECRET=<همان RELAY_SHARED_SECRET>
 باقی‌مانده (`/bot<TOKEN>/sendMessage`) به `TELEGRAM_TARGET_BASE_URL` زده می‌شود — همان مکانیزم
 Kie.ai بالا. بدون ست‌کردن `TELEGRAM_TARGET_BASE_URL` روی این سرور، مسیر `/telegram` اصلاً وجود
 ندارد و بقیه‌ی relay دست‌نخورده می‌ماند.
+
+### جهت ورودی (تلگرام -> relay -> بک‌اند ایران): وبهوک
+
+این مسیر شکل دیگری دارد چون خودِ تلگرام (نه بک‌اند ما) این درخواست را می‌زند — هدر
+`X-Relay-Secret` را نمی‌فرستد، پس این مسیر خاص از چک secret این relay معاف است (امنیت با
+`secret_token` تلگرام تأمین می‌شود که بک‌اند از قبل چک می‌کند؛ `server.js` فقط بی‌طرف فوروارد
+می‌کند). یک مسیر ثابت است، نه prefix — `/telegram-webhook`.
+
+روی سرور relay:
+```
+TELEGRAM_WEBHOOK_TARGET_URL=https://api.nivoai.ir/api/v1/v2/telegram/webhook
+```
+(آدرس کامل endpoint وبهوک روی بک‌اند ایران — نه فقط دامنه.)
+
+بعد از دیپلوی این نسخه‌ی relay، وبهوک تلگرام را به‌جای آدرس مستقیم بک‌اند، به آدرس relay ست
+کنید:
+```bash
+curl -s "https://api.telegram.org/bot<TOKEN>/setWebhook" \
+  -d url="https://relay.nivoai.site/telegram-webhook" \
+  -d secret_token="<همان secret_token قبلی/TELEGRAM_WEBHOOK_SECRET بک‌اند>"
+```
+بدون ست‌کردن `TELEGRAM_WEBHOOK_TARGET_URL`، مسیر `/telegram-webhook` روی این relay با ۴۰۴ رد
+می‌شود و بقیه‌ی relay دست‌نخورده می‌ماند.
