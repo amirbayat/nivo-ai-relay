@@ -122,3 +122,27 @@ curl -s "https://api.telegram.org/bot<TOKEN>/setWebhook" \
 ```
 بدون ست‌کردن `TELEGRAM_WEBHOOK_TARGET_URL`، مسیر `/telegram-webhook` روی این relay با ۴۰۴ رد
 می‌شود و بقیه‌ی relay دست‌نخورده می‌ماند.
+
+## بات دوم — مدیریت پنل فروشنده (docs/PRD-seller-telegram-management-bot.md)
+
+توکن/وبهوک کاملاً جدا از بات بالا، ولی همان مشکل فیلترینگ ایران را دارد. **outbound نیازی به
+تنظیم جدا ندارد** — همان route `/telegram` بالا کافی است چون relay فقط prefix را کنار می‌گذارد
+و توکن را دست‌نخورده به `TELEGRAM_TARGET_BASE_URL` می‌زند؛ روی env بک‌اند فقط کافی است
+`SELLER_BOT_API_BASE_URL=https://relay.nivoai.site/telegram` و
+`SELLER_BOT_RELAY_SECRET=<همان RELAY_SHARED_SECRET>` ست شود.
+
+**inbound** مسیر جدا می‌خواهد (`/seller-bot-webhook`، چون target یک endpoint متفاوت روی بک‌اند
+است). روی سرور relay:
+```
+SELLER_BOT_WEBHOOK_TARGET_URL=https://api.nivoai.ir/api/v1/v2/seller-bot/webhook
+```
+
+بعد از دیپلوی این نسخه‌ی relay و دیپلوی بک‌اند با `SELLER_BOT_WEBHOOK_SECRET` ست‌شده، وبهوک
+بات دوم را ثبت کنید:
+```bash
+curl -s "https://api.telegram.org/bot<SELLER_BOT_TOKEN>/setWebhook" \
+  -d url="https://relay.nivoai.site/seller-bot-webhook" \
+  -d secret_token="<همان SELLER_BOT_WEBHOOK_SECRET بک‌اند>"
+```
+بدون ست‌کردن `SELLER_BOT_WEBHOOK_TARGET_URL`، مسیر `/seller-bot-webhook` روی این relay با ۴۰۴
+رد می‌شود و بقیه‌ی relay (شامل بات اول) دست‌نخورده می‌ماند.

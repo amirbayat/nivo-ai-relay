@@ -18,19 +18,27 @@ if (!SHARED_SECRET) {
   process.exit(1);
 }
 
-// مسیر ثابتی که خودِ تلگرام (نه بک‌اند ما) با POST صدا می‌زند — برخلاف مسیرهای بالا که
-// outbound (بک‌اند ایران -> این relay -> تلگرام) هستند، این یکی inbound است (تلگرام -> این
+// مسیرهای ثابتی که خودِ تلگرام (نه بک‌اند ما) با POST صدا می‌زند — برخلاف مسیرهای بالا که
+// outbound (بک‌اند ایران -> این relay -> تلگرام) هستند، این‌ها inbound هستند (تلگرام -> این
 // relay -> بک‌اند ایران). طبق تجربه‌ی واقعی پروداکشن، وبهوک مستقیم به سرور ایران هم فیلتر
 // می‌شود (نه فقط outbound)، پس این relay هم باید طرف دریافت وبهوک را پوشش بدهد.
-// چون درخواست از خودِ تلگرام می‌آید، هدر X-Relay-Secret را نمی‌فرستد — این مسیر از چک
-// isAuthorized معاف است؛ امنیت با secret_token تلگرام تأمین می‌شود که خودِ بک‌اند
-// (telegram.controller.ts) از قبل چک می‌کند، پس این relay فقط بی‌طرف فوروارد می‌کند.
-const TELEGRAM_WEBHOOK_PATH = '/telegram-webhook';
-const TELEGRAM_WEBHOOK_TARGET_URL = process.env.TELEGRAM_WEBHOOK_TARGET_URL || '';
-let telegramWebhookTarget = null;
-if (TELEGRAM_WEBHOOK_TARGET_URL) {
-  const parsed = new URL(TELEGRAM_WEBHOOK_TARGET_URL);
-  telegramWebhookTarget = { origin: parsed.origin, path: parsed.pathname + parsed.search };
+// چون درخواست از خودِ تلگرام می‌آید، هدر X-Relay-Secret را نمی‌فرستد — این مسیرها از چک
+// isAuthorized معاف‌اند؛ امنیت با secret_token تلگرام تأمین می‌شود که خودِ بک‌اند
+// (telegram.controller.ts/seller-bot.controller.ts) از قبل چک می‌کند، این relay فقط
+// بی‌طرف فوروارد می‌کند. docs/PRD-seller-telegram-management-bot.md — بات دوم (مدیریت پنل)
+// یک مسیر inbound جدا می‌خواهد چون هدف (backend endpoint) فرق دارد با بات اول.
+const WEBHOOK_PATH_DEFS = [
+  { path: '/telegram-webhook', targetUrl: process.env.TELEGRAM_WEBHOOK_TARGET_URL },
+  { path: '/seller-bot-webhook', targetUrl: process.env.SELLER_BOT_WEBHOOK_TARGET_URL },
+];
+const KNOWN_WEBHOOK_PATHS = WEBHOOK_PATH_DEFS.map((def) => def.path);
+const WEBHOOK_ROUTES = WEBHOOK_PATH_DEFS.filter((def) => def.targetUrl).map((def) => {
+  const parsed = new URL(def.targetUrl);
+  return { path: def.path, origin: parsed.origin, forwardPath: parsed.pathname + parsed.search };
+});
+
+function resolveWebhookRoute(url) {
+  return WEBHOOK_ROUTES.find((route) => route.path === url) ?? null;
 }
 
 // این ریله دیگر فقط برای OpenRouter نیست — یک reverse-proxy چندمقصده شده: با یک prefix روی
@@ -166,20 +174,15 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  if (req.method === 'POST' && req.url === TELEGRAM_WEBHOOK_PATH) {
-    if (!telegramWebhookTarget) {
-      res.writeHead(404, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ error: 'telegram_webhook_not_configured' }));
-      return;
-    }
-
+  const webhookRoute = req.method === 'POST' ? resolveWebhookRoute(req.url) : null;
+  if (webhookRoute) {
     logHeaders(req);
 
     let bodyBuffer;
     try {
       bodyBuffer = await readBody(req);
     } catch (err) {
-      console.error('relay: failed to read telegram webhook body:', err.message);
+      console.error(`relay: failed to read ${webhookRoute.path} body:`, err.message);
       res.writeHead(400, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ error: 'bad_request' }));
       return;
@@ -187,14 +190,20 @@ const server = http.createServer(async (req, res) => {
 
     logPrompt(req, bodyBuffer);
 
-    console.log(`relay: telegram webhook -> ${telegramWebhookTarget.origin}${telegramWebhookTarget.path}`);
+    console.log(`relay: ${webhookRoute.path} -> ${webhookRoute.origin}${webhookRoute.forwardPath}`);
     req._relayOriginalUrl = req.url;
-    req._relayTarget = telegramWebhookTarget.origin;
-    req.url = telegramWebhookTarget.path;
+    req._relayTarget = webhookRoute.origin;
+    req.url = webhookRoute.forwardPath;
 
     const webhookBuffer = new PassThrough();
     webhookBuffer.end(bodyBuffer);
-    proxy.web(req, res, { target: telegramWebhookTarget.origin, buffer: webhookBuffer });
+    proxy.web(req, res, { target: webhookRoute.origin, buffer: webhookBuffer });
+    return;
+  }
+  if (req.method === 'POST' && KNOWN_WEBHOOK_PATHS.includes(req.url)) {
+    // مسیر inbound شناخته‌شده است ولی target env مربوطه ست نشده
+    res.writeHead(404, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ error: 'webhook_not_configured' }));
     return;
   }
 
@@ -250,9 +259,9 @@ server.listen(PORT, () => {
   for (const route of ROUTES) {
     console.log(`relay: route ${route.prefix}/* -> ${route.target}`);
   }
-  if (telegramWebhookTarget) {
+  for (const route of WEBHOOK_ROUTES) {
     console.log(
-      `relay: route POST ${TELEGRAM_WEBHOOK_PATH} -> ${telegramWebhookTarget.origin}${telegramWebhookTarget.path} (inbound, no X-Relay-Secret required)`,
+      `relay: route POST ${route.path} -> ${route.origin}${route.forwardPath} (inbound, no X-Relay-Secret required)`,
     );
   }
   console.log(
